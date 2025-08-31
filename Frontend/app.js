@@ -1,5 +1,3 @@
-// app.js - Main Application Component
-
 class ErrorBoundary extends React.Component {
   constructor(props) {
     super(props);
@@ -17,19 +15,15 @@ class ErrorBoundary extends React.Component {
   render() {
     if (this.state.hasError) {
       return (
-        <div className="min-h-screen flex items-center justify-center" style={{background: 'var(--base-bg)'}}>
+        <div className="min-h-screen flex items-center justify-center" style={{ background: 'var(--base-bg)' }}>
           <div className="text-center p-8 card">
             <div className="w-16 h-16 bg-gradient-to-r from-red-500 to-red-600 rounded-full flex items-center justify-center mx-auto mb-4">
               <i className="icon-alert-circle text-white text-2xl"></i>
             </div>
-            <h1 className="text-2xl font-bold mb-4" style={{color: 'var(--primary-text)'}}>Campus Connection Lost</h1>
-            <p className="mb-6" style={{color: 'var(--secondary-text)'}}>We're experiencing technical difficulties. Please try refreshing the page.</p>
-            <button 
-              onClick={() => window.location.reload()} 
-              className="btn btn-primary hover-lift"
-            >
-              <i className="icon-refresh-cw text-sm mr-2"></i>
-              Reconnect to Campus
+            <h1 className="text-2xl font-bold mb-4" style={{ color: 'var(--primary-text)' }}>Campus Connection Lost</h1>
+            <p className="mb-6" style={{ color: 'var(--secondary-text)' }}>We're experiencing technical difficulties. Please try refreshing the page.</p>
+            <button onClick={() => window.location.reload()} className="btn btn-primary hover-lift">
+              <i className="icon-refresh-cw text-sm mr-2"></i>Reconnect to Campus
             </button>
           </div>
         </div>
@@ -40,433 +34,432 @@ class ErrorBoundary extends React.Component {
 }
 
 function App() {
-  // Initialize all state variables with proper default values
   const [user, setUser] = React.useState(null);
   const [loading, setLoading] = React.useState(true);
   const [currentRoute, setCurrentRoute] = React.useState('/');
   const [authMode, setAuthMode] = React.useState('login');
   const [campusInitialized, setCampusInitialized] = React.useState(false);
   const [userProfile, setUserProfile] = React.useState(null);
-  const [initializationProgress, setInitializationProgress] = React.useState(0);
   const [initializationError, setInitializationError] = React.useState(null);
+  const [retryCount, setRetryCount] = React.useState(0);
+  const routeRef = React.useRef('/');
 
-  // Campus initialization effect
+  // Maximum retry attempts and timeout settings
+  const MAX_RETRIES = 3;
+  const INIT_TIMEOUT = 10000; // 10 seconds
+  const AUTH_TIMEOUT = 8000; // 8 seconds
+
+  // Initialize Campus with proper timeout and error handling
   React.useEffect(() => {
     const initializeCampus = async () => {
+      const startTime = Date.now();
+      
       try {
         console.log('Starting campus initialization...');
-        setInitializationProgress(10);
         
-        // Wait for Firebase to be available
-        let attempts = 0;
-        while (typeof firebase === 'undefined' && attempts < 50) {
-          await new Promise(resolve => setTimeout(resolve, 100));
-          attempts++;
-        }
-        
-        if (typeof firebase === 'undefined') {
-          throw new Error('Firebase failed to load after 5 seconds');
-        }
-        
-        setInitializationProgress(25);
-        console.log('Firebase loaded successfully');
-        
-        // Wait for Firebase services to be initialized
-        attempts = 0;
-        while ((!window.auth || !window.firestore) && attempts < 30) {
-          await new Promise(resolve => setTimeout(resolve, 100));
-          attempts++;
-        }
-        
-        setInitializationProgress(50);
-        
-        if (!window.auth) {
-          console.warn('Firebase Auth not available, continuing with limited functionality');
-        }
-        
-        if (!window.firestore) {
-          console.warn('Firestore not available, continuing with limited functionality');
-        }
-        
-        setInitializationProgress(75);
-        
-        // Test Firebase connection if available
-        let connected = false;
-        if (window.checkFirebaseConnection) {
+        // Create a timeout promise
+        const timeoutPromise = new Promise((_, reject) => 
+          setTimeout(() => reject(new Error('Initialization timeout')), INIT_TIMEOUT)
+        );
+
+        // Firebase initialization with timeout
+        const initPromise = new Promise(async (resolve, reject) => {
           try {
-            connected = await window.checkFirebaseConnection();
+            let attempts = 0;
+            const maxWait = 50; // ms between checks
+            
+            // Wait for Firebase with retry logic
+            while (!window.auth || !window.firestore) {
+              if (attempts * maxWait > AUTH_TIMEOUT) {
+                throw new Error('Firebase services not available');
+              }
+              await new Promise(r => setTimeout(r, maxWait));
+              attempts++;
+            }
+
+            console.log('Firebase services detected');
+            resolve();
           } catch (error) {
-            console.warn('Firebase connection test failed:', error);
+            reject(error);
           }
+        });
+
+        // Race between initialization and timeout
+        await Promise.race([initPromise, timeoutPromise]);
+
+        setCampusInitialized(true);
+        console.log('Campus initialized successfully');
+
+        // Setup auth listener with timeout protection
+        setupAuthListener();
+
+      } catch (error) {
+        console.error('Campus initialization failed:', error);
+        
+        if (retryCount < MAX_RETRIES) {
+          console.log(`Retrying initialization (${retryCount + 1}/${MAX_RETRIES})`);
+          setRetryCount(prev => prev + 1);
+          // Retry after delay
+          setTimeout(() => {
+            setInitializationError(null);
+            setCampusInitialized(false);
+          }, 2000 * (retryCount + 1)); // Exponential backoff
+          return;
         }
         
-        setInitializationProgress(100);
-        console.log('Campus initialization completed, Firebase connected:', connected);
+        // Fallback to offline mode after max retries
+        console.log('Switching to offline mode');
+        setInitializationError('Unable to connect to campus services. Running in offline mode.');
+        setCampusInitialized(true);
+        setupOfflineMode();
+      } finally {
+        // Always clear loading after timeout
+        const elapsed = Date.now() - startTime;
+        const minLoadTime = 1000; // Minimum loading time for UX
         
-        setTimeout(() => {
-          setCampusInitialized(true);
-        }, 300);
-        
-      } catch (error) {
-        console.error('Error initializing campus:', error);
-        setInitializationError(error.message);
-        setInitializationProgress(100);
-        setTimeout(() => {
-          setCampusInitialized(true);
-        }, 1000);
+        if (elapsed < minLoadTime) {
+          setTimeout(() => setLoading(false), minLoadTime - elapsed);
+        } else {
+          setLoading(false);
+        }
       }
     };
 
     initializeCampus();
-  }, []);
+  }, [retryCount]);
 
-  // Authentication state management
-  React.useEffect(() => {
-    if (!campusInitialized) return;
-    
-    let unsubscribe = () => {};
-    
+  // Setup Firebase Auth Listener
+  const setupAuthListener = () => {
     try {
-      // Check if Firebase Auth is available
-      if (!window.auth) {
-        console.warn('Firebase Auth not available, setting loading to false');
-        setLoading(false);
-        return;
-      }
-
-      unsubscribe = window.auth.onAuthStateChanged(async (authUser) => {
-        try {
-          console.log('Auth state changed:', authUser ? 'User logged in' : 'User logged out');
+      if (window.auth && window.auth.onAuthStateChanged) {
+        const unsubscribe = window.auth.onAuthStateChanged(async (authUser) => {
+          console.log('Auth state changed:', authUser ? 'User logged in' : 'No user');
           setUser(authUser);
-          
+
           if (authUser) {
-            try {
-              // Get user profile
-              let profile = null;
-              if (window.authUtils) {
-                profile = await window.authUtils.getUserProfile(authUser.uid);
-              }
-              
-              if (profile) {
-                setUserProfile(profile);
-                console.log('User profile loaded:', profile.displayName);
-              } else {
-                // Create minimal profile if none exists
-                const defaultProfile = {
-                  uid: authUser.uid,
-                  displayName: authUser.displayName || authUser.email?.split('@')[0] || 'Student',
-                  email: authUser.email,
-                  role: 'student',
-                  points: 0,
-                  level: 1,
-                  badges: [],
-                  notifications: [],
-                  profileComplete: true,
-                  isOnline: true,
-                  createdAt: new Date(),
-                  updatedAt: new Date()
-                };
-                
-                setUserProfile(defaultProfile);
-                console.log('Created default profile for user');
-                
-                // Try to save to Firestore if available
-                if (window.firestore) {
-                  try {
-                    await window.firestore.collection('users').doc(authUser.uid).set(defaultProfile, { merge: true });
-                    console.log('Default profile saved to Firestore');
-                  } catch (firestoreError) {
-                    console.warn('Failed to save profile to Firestore:', firestoreError);
-                  }
-                }
-              }
-              
-              // Update online status if Firestore is available
-              if (window.firestore) {
-                try {
-                  await window.firestore.collection('users').doc(authUser.uid).set({
-                    isOnline: true,
-                    lastSeen: firebase.firestore.FieldValue.serverTimestamp()
-                  }, { merge: true });
-                } catch (error) {
-                  console.warn('Failed to update online status:', error);
-                }
-              }
-            } catch (error) {
-              console.error('Error processing user profile:', error);
-            }
+            await loadUserProfile(authUser);
           } else {
             setUserProfile(null);
           }
+        });
+
+        // Cleanup function
+        return unsubscribe;
+      } else {
+        throw new Error('Firebase Auth not available');
+      }
+    } catch (error) {
+      console.error('Auth listener setup failed:', error);
+      // Fallback: Check for existing session
+      const savedUser = localStorage.getItem('virtual_hub_user');
+      if (savedUser) {
+        try {
+          const userData = JSON.parse(savedUser);
+          setUser(userData);
+          setUserProfile(userData.profile || null);
+        } catch (e) {
+          console.error('Error parsing saved user:', e);
+          localStorage.removeItem('virtual_hub_user');
+        }
+      }
+    }
+  };
+
+  // Setup Offline Mode
+  const setupOfflineMode = () => {
+    console.log('Setting up offline mode');
+    
+    // Check for cached user data
+    const cachedUser = localStorage.getItem('virtual_hub_user');
+    const cachedProfile = localStorage.getItem('virtual_hub_profile');
+    
+    if (cachedUser && cachedProfile) {
+      try {
+        setUser(JSON.parse(cachedUser));
+        setUserProfile(JSON.parse(cachedProfile));
+        console.log('Loaded cached user data');
+      } catch (error) {
+        console.error('Error loading cached data:', error);
+      }
+    }
+  };
+
+  // Load User Profile with error handling
+  const loadUserProfile = async (authUser) => {
+    try {
+      if (!window.firestore) {
+        // Use cached profile or create basic profile
+        const cachedProfile = localStorage.getItem('virtual_hub_profile');
+        if (cachedProfile) {
+          setUserProfile(JSON.parse(cachedProfile));
+          return;
+        }
+        
+        // Create basic profile for offline mode
+        const basicProfile = {
+          uid: authUser.uid,
+          displayName: authUser.displayName || authUser.email?.split('@')[0] || 'Student',
+          email: authUser.email,
+          role: 'student',
+          points: 0,
+          level: 1,
+          badges: [],
+          notifications: [],
+          profileComplete: true,
+          isOnline: true,
+          createdAt: new Date(),
+          updatedAt: new Date()
+        };
+        
+        setUserProfile(basicProfile);
+        localStorage.setItem('virtual_hub_profile', JSON.stringify(basicProfile));
+        return;
+      }
+
+      // Try to load from Firestore with timeout
+      const profilePromise = new Promise(async (resolve, reject) => {
+        try {
+          const userRef = window.firestore.collection('users').doc(authUser.uid);
+          const doc = await userRef.get();
           
-          setLoading(false);
+          const profile = doc.exists ? doc.data() : {
+            uid: authUser.uid,
+            displayName: authUser.displayName || authUser.email?.split('@')[0] || 'Student',
+            email: authUser.email,
+            role: 'student',
+            points: 0,
+            level: 1,
+            badges: [],
+            notifications: [],
+            profileComplete: true,
+            isOnline: true,
+            createdAt: new Date(),
+            updatedAt: new Date()
+          };
+
+          if (!doc.exists) {
+            await userRef.set(profile, { merge: true });
+          }
+
+          // Update online status
+          await userRef.set({
+            isOnline: true,
+            lastSeen: firebase.firestore.FieldValue.serverTimestamp()
+          }, { merge: true });
+
+          resolve(profile);
         } catch (error) {
-          console.error('Auth state change error:', error);
-          setLoading(false);
+          reject(error);
         }
       });
 
-    } catch (error) {
-      console.error('Auth listener setup error:', error);
-      setLoading(false);
-    }
+      const timeoutPromise = new Promise((_, reject) =>
+        setTimeout(() => reject(new Error('Profile load timeout')), 5000)
+      );
 
-    // Route change handling
+      const profile = await Promise.race([profilePromise, timeoutPromise]);
+      setUserProfile(profile);
+      
+      // Cache profile data
+      localStorage.setItem('virtual_hub_profile', JSON.stringify(profile));
+      localStorage.setItem('virtual_hub_user', JSON.stringify({
+        uid: authUser.uid,
+        email: authUser.email,
+        displayName: authUser.displayName,
+        profile
+      }));
+
+    } catch (error) {
+      console.warn('Error loading/creating profile:', error);
+      
+      // Use cached data or create minimal profile
+      const cachedProfile = localStorage.getItem('virtual_hub_profile');
+      if (cachedProfile) {
+        setUserProfile(JSON.parse(cachedProfile));
+      } else {
+        const minimalProfile = {
+          uid: authUser.uid,
+          displayName: authUser.displayName || 'Student',
+          email: authUser.email,
+          role: 'student',
+          points: 0,
+          level: 1,
+          badges: [],
+          profileComplete: true,
+          isOnline: false
+        };
+        setUserProfile(minimalProfile);
+      }
+    }
+  };
+
+  // Route handling
+  React.useEffect(() => {
     const handleRouteChange = () => {
-      try {
-        const route = window.location.hash.slice(1) || '/';
+      const route = window.location.hash.slice(1) || '/';
+      if (routeRef.current !== route) {
+        routeRef.current = route;
         setCurrentRoute(route);
         console.log('Route changed to:', route);
-      } catch (error) {
-        console.error('Route change error:', error);
-        setCurrentRoute('/');
       }
     };
 
     window.addEventListener('hashchange', handleRouteChange);
     handleRouteChange();
 
-    // Cleanup on page unload
+    return () => window.removeEventListener('hashchange', handleRouteChange);
+  }, []);
+
+  // Update offline status on unload (with error handling)
+  React.useEffect(() => {
     const handleBeforeUnload = async () => {
       if (user && window.firestore) {
         try {
-          await window.firestore.collection('users').doc(user.uid).update({
-            isOnline: false,
-            lastSeen: firebase.firestore.FieldValue.serverTimestamp()
-          });
+          await Promise.race([
+            window.firestore.collection('users').doc(user.uid).update({
+              isOnline: false,
+              lastSeen: firebase.firestore.FieldValue.serverTimestamp()
+            }),
+            new Promise((_, reject) => setTimeout(() => reject(new Error('Timeout')), 2000))
+          ]);
         } catch (error) {
-          console.error('Error updating offline status on unload:', error);
+          console.warn('Could not update offline status:', error);
         }
       }
     };
 
     window.addEventListener('beforeunload', handleBeforeUnload);
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
+  }, [user]);
 
-    return () => {
-      try {
-        unsubscribe();
-        window.removeEventListener('hashchange', handleRouteChange);
-        window.removeEventListener('beforeunload', handleBeforeUnload);
-      } catch (error) {
-        console.error('Cleanup error:', error);
-      }
-    };
-  }, [campusInitialized, user]);
+  // Retry initialization function
+  const retryInitialization = () => {
+    setInitializationError(null);
+    setLoading(true);
+    setCampusInitialized(false);
+    setRetryCount(0);
+  };
 
-  // Show initialization error if it occurred
-  if (initializationError) {
+  // Render initialization error
+  if (initializationError && !campusInitialized) {
     return (
-      <div className="min-h-screen flex items-center justify-center" style={{background: 'var(--base-bg)'}}>
-        <div className="text-center p-8 card">
-          <div className="w-16 h-16 bg-gradient-to-r from-red-500 to-red-600 rounded-full flex items-center justify-center mx-auto mb-4">
-            <i className="icon-alert-triangle text-white text-2xl"></i>
+      <div className="min-h-screen flex items-center justify-center" style={{ background: 'var(--base-bg)' }}>
+        <div className="text-center p-8 card max-w-md">
+          <div className="w-16 h-16 bg-gradient-to-r from-yellow-500 to-orange-600 rounded-full flex items-center justify-center mx-auto mb-4">
+            <i className="icon-wifi-off text-white text-2xl"></i>
           </div>
-          <h1 className="text-2xl font-bold mb-4" style={{color: 'var(--primary-text)'}}>Campus Setup Failed</h1>
-          <p className="mb-4" style={{color: 'var(--secondary-text)'}}>{initializationError}</p>
-          <button 
-            onClick={() => window.location.reload()} 
-            className="btn btn-primary hover-lift"
-          >
-            <i className="icon-refresh-cw text-sm mr-2"></i>
-            Retry Setup
-          </button>
+          <h1 className="text-2xl font-bold mb-4" style={{ color: 'var(--primary-text)' }}>Connection Issues</h1>
+          <p className="mb-6 text-sm" style={{ color: 'var(--secondary-text)' }}>{initializationError}</p>
+          <div className="space-y-3">
+            <button onClick={retryInitialization} className="btn btn-primary hover-lift w-full">
+              <i className="icon-refresh-cw text-sm mr-2"></i>Retry Connection
+            </button>
+            <button 
+              onClick={() => {
+                setCampusInitialized(true);
+                setInitializationError(null);
+                setupOfflineMode();
+              }} 
+              className="btn btn-secondary hover-lift w-full"
+            >
+              <i className="icon-globe text-sm mr-2"></i>Continue Offline
+            </button>
+          </div>
         </div>
       </div>
     );
   }
 
-  // Loading state during initialization
+  // Render loading state
   if (loading || !campusInitialized) {
     return (
-      <div className="min-h-screen flex items-center justify-center" style={{background: 'var(--base-bg)'}}>
+      <div className="min-h-screen flex items-center justify-center" style={{ background: 'var(--base-bg)' }}>
         <div className="text-center p-8">
-          <div className="relative mb-8">
-            <div className="w-20 h-20 campus-building flex items-center justify-center mx-auto">
-              <i className="icon-graduation-cap text-white text-3xl animate-pulse"></i>
-            </div>
-            <div className="absolute inset-0 w-20 h-20 border-4 border-blue-200 rounded-full animate-spin mx-auto" style={{borderColor: 'var(--accent-blue)', borderTopColor: 'transparent'}}></div>
+          <div className="w-20 h-20 campus-building flex items-center justify-center mx-auto mb-4">
+            <i className="icon-graduation-cap text-white text-3xl animate-pulse"></i>
           </div>
-          
-          <h2 className="text-2xl font-bold mb-4 text-gradient">
-            {!campusInitialized ? 'Setting up Virtual Campus...' : 'Loading Campus Hub...'}
-          </h2>
-          
-          <div className="w-64 bg-gray-200 rounded-full h-3 mx-auto mb-4 overflow-hidden" style={{backgroundColor: 'var(--border-color)'}}>
-            <div 
-              className="progress-bar h-3 rounded-full transition-all duration-1000 ease-out"
-              style={{ width: `${initializationProgress}%` }}
-            ></div>
+          <h2 className="text-2xl font-bold mb-4 text-gradient">Loading Virtual Campus...</h2>
+          <div className="w-48 h-2 bg-gray-200 rounded-full mx-auto mb-4">
+            <div className="progress-bar h-full rounded-full" style={{ width: `${Math.min(100, (Date.now() % 3000) / 30)}%` }}></div>
           </div>
-          
-          <p style={{color: 'var(--secondary-text)'}} className="animate-pulse">
-            {initializationProgress < 25 ? 'Loading Firebase...' :
-             initializationProgress < 50 ? 'Initializing services...' :
-             initializationProgress < 75 ? 'Connecting to database...' :
-             'Almost ready...'}
+          <p className="text-sm" style={{ color: 'var(--secondary-text)' }}>
+            {retryCount > 0 ? `Attempting to reconnect... (${retryCount}/${MAX_RETRIES})` : 'Initializing campus services...'}
           </p>
         </div>
       </div>
     );
   }
 
-  // Authentication flow - Show login/signup if no user
+  // Render authentication
   if (!user) {
     return (
-      <div className="min-h-screen flex items-center justify-center" style={{background: 'var(--base-bg)'}}>
+      <div className="min-h-screen flex items-center justify-center" style={{ background: 'var(--base-bg)' }}>
         <div className="max-w-md w-full mx-4">
-          <div className="text-center mb-8 animate-fade-in-up">
-            <div className="w-20 h-20 campus-building mx-auto mb-6 flex items-center justify-center hover-lift">
-              <i className="icon-graduation-cap text-white text-3xl"></i>
+          {initializationError && (
+            <div className="mb-4 p-3 bg-yellow-100 border border-yellow-300 rounded-lg text-center">
+              <p className="text-sm text-yellow-800">
+                <i className="icon-wifi-off mr-2"></i>
+                Running in offline mode - some features may be limited
+              </p>
             </div>
-            <h1 className="text-4xl font-bold mb-3 text-gradient">Virtual Campus</h1>
-            <p style={{color: 'var(--secondary-text)'}} className="text-lg">Your Digital Learning Ecosystem</p>
-          </div>
-          
-          <div className="animate-fade-in-up" style={{ animationDelay: '0.2s' }}>
-            {authMode === 'login' ? (
-              typeof LoginForm !== 'undefined' ? (
-                React.createElement(LoginForm, { onSwitchToSignup: () => setAuthMode('signup') })
-              ) : (
-                <div className="text-center p-8 card">
-                  <p style={{color: 'var(--secondary-text)'}}>Loading login form...</p>
-                  <button 
-                    onClick={() => window.location.reload()} 
-                    className="btn btn-primary mt-4"
-                  >
-                    Refresh Page
-                  </button>
-                </div>
-              )
-            ) : (
-              typeof SignupForm !== 'undefined' ? (
-                React.createElement(SignupForm, { onSwitchToLogin: () => setAuthMode('login') })
-              ) : (
-                <div className="text-center p-8 card">
-                  <p style={{color: 'var(--secondary-text)'}}>Loading signup form...</p>
-                  <button 
-                    onClick={() => setAuthMode('login')} 
-                    className="btn btn-primary mt-4"
-                  >
-                    Back to Login
-                  </button>
-                </div>
-              )
-            )}
-          </div>
+          )}
+          {authMode === 'login'
+            ? React.createElement(window.LoginForm, { onSwitchToSignup: () => setAuthMode('signup') })
+            : React.createElement(window.SignupForm, { onSwitchToLogin: () => setAuthMode('login') })
+          }
         </div>
       </div>
     );
   }
 
-  // Profile setup needed
+  // Render profile setup
   if (!userProfile?.profileComplete) {
-    return typeof ProfileSetup !== 'undefined' ? (
-      React.createElement(ProfileSetup, { 
-        user: user, 
-        onProfileComplete: (profileData) => {
-          setUserProfile(prev => ({ ...prev, ...profileData, profileComplete: true }));
-        }
-      })
-    ) : (
-      <div className="min-h-screen flex items-center justify-center" style={{background: 'var(--base-bg)'}}>
-        <div className="text-center p-8 card">
-          <h2 className="text-xl font-bold mb-4" style={{color: 'var(--primary-text)'}}>Profile Setup Required</h2>
-          <p style={{color: 'var(--secondary-text)'}} className="mb-4">Loading profile setup...</p>
-          <button 
-            onClick={() => window.location.reload()} 
-            className="btn btn-primary"
-          >
-            Refresh Page
-          </button>
-        </div>
-      </div>
-    );
+    return React.createElement(window.ProfileSetup, {
+      user,
+      onProfileComplete: (profileData) => setUserProfile(prev => ({ ...prev, ...profileData, profileComplete: true }))
+    });
   }
 
-  // Main app rendering function
+  // Main app render
   const renderCurrentPage = () => {
+    const pageProps = { user, userProfile, setCurrentRoute };
+    const pages = {
+      '/': window.CampusHub,
+      '/campus-hub': window.CampusHub,
+      '/study-groups': window.StudyGroups,
+      '/mentors': window.Mentors,
+      '/resources': window.Resources,
+      '/opportunities': window.Opportunities,
+      '/leaderboard': window.Leaderboard,
+      '/admin': window.Admin
+    };
+    const PageComponent = pages[currentRoute] || window.CampusHub;
+    
     try {
-      const pageProps = { user, userProfile, setCurrentRoute };
-      
-      console.log('Rendering page for route:', currentRoute);
-      
-      switch (currentRoute) {
-        case '/':
-        case '/campus-hub':
-          return typeof CampusHub !== 'undefined' ? 
-            React.createElement(CampusHub, pageProps) : 
-            <div className="p-8 text-center card">
-              <h3 className="text-lg font-semibold mb-2" style={{color: 'var(--primary-text)'}}>Campus Hub</h3>
-              <p style={{color: 'var(--secondary-text)'}}>Campus Hub component not loaded</p>
-            </div>;
-            
-        case '/study-groups':
-          return typeof StudyGroups !== 'undefined' ? 
-            React.createElement(StudyGroups, pageProps) : 
-            <div className="p-8 text-center card">
-              <h3 className="text-lg font-semibold mb-2" style={{color: 'var(--primary-text)'}}>Study Groups</h3>
-              <p style={{color: 'var(--secondary-text)'}}>Study Groups component not loaded</p>
-            </div>;
-            
-        case '/mentors':
-          return typeof Mentors !== 'undefined' ? 
-            React.createElement(Mentors, pageProps) : 
-            <div className="p-8 text-center card">
-              <h3 className="text-lg font-semibold mb-2" style={{color: 'var(--primary-text)'}}>Mentors</h3>
-              <p style={{color: 'var(--secondary-text)'}}>Mentors component not loaded</p>
-            </div>;
-            
-        case '/resources':
-          return typeof Resources !== 'undefined' ? 
-            React.createElement(Resources, pageProps) : 
-            <div className="p-8 text-center card">
-              <h3 className="text-lg font-semibold mb-2" style={{color: 'var(--primary-text)'}}>Resources</h3>
-              <p style={{color: 'var(--secondary-text)'}}>Resources component not loaded</p>
-            </div>;
-            
-        case '/opportunities':
-          return typeof Opportunities !== 'undefined' ? 
-            React.createElement(Opportunities, pageProps) : 
-            <div className="p-8 text-center card">
-              <h3 className="text-lg font-semibold mb-2" style={{color: 'var(--primary-text)'}}>Opportunities</h3>
-              <p style={{color: 'var(--secondary-text)'}}>Opportunities component not loaded</p>
-            </div>;
-            
-        case '/leaderboard':
-          return typeof Leaderboard !== 'undefined' ? 
-            React.createElement(Leaderboard, pageProps) : 
-            <div className="p-8 text-center card">
-              <h3 className="text-lg font-semibold mb-2" style={{color: 'var(--primary-text)'}}>Leaderboard</h3>
-              <p style={{color: 'var(--secondary-text)'}}>Leaderboard component not loaded</p>
-            </div>;
-            
-        case '/admin':
-          return typeof Admin !== 'undefined' ? 
-            React.createElement(Admin, pageProps) : 
-            <div className="p-8 text-center card">
-              <h3 className="text-lg font-semibold mb-2" style={{color: 'var(--primary-text)'}}>Admin Panel</h3>
-              <p style={{color: 'var(--secondary-text)'}}>Admin component not loaded</p>
-            </div>;
-            
-        default:
-          return typeof CampusHub !== 'undefined' ? 
-            React.createElement(CampusHub, pageProps) : 
-            <div className="p-8 text-center card">
-              <h3 className="text-lg font-semibold mb-2" style={{color: 'var(--primary-text)'}}>Welcome to Campus</h3>
-              <p style={{color: 'var(--secondary-text)'}}>Default page loading...</p>
-            </div>;
-      }
-    } catch (error) {
-      console.error('Error rendering page:', error);
-      return (
-        <div className="p-8 text-center card">
-          <div className="icon-alert-circle text-4xl text-red-500 mb-4"></div>
-          <h3 className="text-lg font-semibold mb-2" style={{color: 'var(--primary-text)'}}>Page Loading Error</h3>
-          <p style={{color: 'var(--secondary-text)'}}>Please refresh the page to try again</p>
+      return PageComponent ? React.createElement(PageComponent, pageProps) : (
+        <div className="p-6 text-center">
+          <div className="icon-compass text-4xl" style={{ color: 'var(--secondary-text)' }}></div>
+          <h3 className="text-lg font-semibold mt-4 mb-2" style={{ color: 'var(--primary-text)' }}>Page Not Found</h3>
+          <p style={{ color: 'var(--secondary-text)' }}>The requested page could not be loaded.</p>
           <button 
-            onClick={() => window.location.reload()} 
+            onClick={() => {
+              setCurrentRoute('/');
+              window.location.hash = '/';
+            }}
             className="btn btn-primary mt-4"
           >
+            Return to Campus Hub
+          </button>
+        </div>
+      );
+    } catch (error) {
+      console.error('Page render error:', error);
+      return (
+        <div className="p-6 text-center">
+          <div className="icon-alert-triangle text-4xl text-red-500 mb-4"></div>
+          <h3 className="text-lg font-semibold mb-2" style={{ color: 'var(--primary-text)' }}>Page Error</h3>
+          <p className="mb-4" style={{ color: 'var(--secondary-text)' }}>There was an error loading this page.</p>
+          <button onClick={() => window.location.reload()} className="btn btn-primary">
             Refresh Page
           </button>
         </div>
@@ -474,136 +467,63 @@ function App() {
     }
   };
 
-  // Main app render
-  try {
-    return (
-      <div className="min-h-screen" style={{background: 'var(--base-bg)'}} data-name="app" data-file="app.js">
-        {typeof Sidebar !== 'undefined' ? 
-          React.createElement(Sidebar, { 
-            currentRoute, 
-            user, 
-            userProfile,
-            onSignOut: async () => {
-              try {
-                if (window.authUtils) {
-                  await window.authUtils.signOut();
-                } else {
-                  console.error('authUtils not available');
-                  window.location.reload();
-                }
-              } catch (error) {
-                console.error('Sign out error:', error);
-                window.location.reload();
-              }
-            }
-          }) : 
-          null
-        }
-        <div className="main-content animate-fade-in-up">
-          {typeof Header !== 'undefined' ? 
-            React.createElement(Header, { 
-              user, 
-              userProfile,
-              onSignOut: async () => {
-                try {
-                  if (window.authUtils) {
-                    await window.authUtils.signOut();
-                  } else {
-                    console.error('authUtils not available');
-                    window.location.reload();
-                  }
-                } catch (error) {
-                  console.error('Sign out error:', error);
-                  window.location.reload();
-                }
-              }
-            }) : 
-            null
-          }
-          <div className="animate-fade-in-up" style={{ animationDelay: '0.1s' }}>
-            {renderCurrentPage()}
+  return (
+    <div className="min-h-screen" style={{ background: 'var(--base-bg)' }}>
+      {/* Connection status indicator */}
+      {initializationError && (
+        <div className="fixed top-4 right-4 z-50">
+          <div className="bg-yellow-100 border border-yellow-300 rounded-lg p-2 text-xs text-yellow-800">
+            <i className="icon-wifi-off mr-1"></i>
+            Offline Mode
           </div>
         </div>
-      </div>
-    );
-  } catch (error) {
-    console.error('App component error:', error);
-    return (
-      <div className="min-h-screen flex items-center justify-center" style={{background: 'var(--base-bg)'}}>
-        <div className="text-center p-8 card">
-          <i className="icon-alert-circle text-4xl text-red-500 mb-4"></i>
-          <h2 className="text-xl font-bold text-red-400 mb-2">Campus System Error</h2>
-          <p className="text-red-300 mb-4">Please refresh the page to reconnect</p>
-          <button 
-            onClick={() => window.location.reload()} 
-            className="btn btn-primary"
-          >
-            Refresh Page
-          </button>
+      )}
+      
+      {window.Sidebar && React.createElement(window.Sidebar, { currentRoute, user, userProfile })}
+      <div className="main-content animate-fade-in-up">
+        {window.Header && React.createElement(window.Header, { user, userProfile })}
+        <div className="animate-fade-in-up" style={{ animationDelay: '0.1s' }}>
+          {renderCurrentPage()}
         </div>
       </div>
-    );
-  }
+    </div>
+  );
 }
 
-// Safe rendering with error handling
-try {
-  // Wait for DOM to be ready
-  if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', initializeApp);
-  } else {
-    initializeApp();
-  }
-} catch (error) {
-  console.error('Critical rendering error:', error);
-  showFallbackUI();
-}
-
+// Initialize App with error handling
 function initializeApp() {
   try {
     const rootElement = document.getElementById('root');
     if (!rootElement) {
-      throw new Error('Root element not found');
+      console.error('Root element not found');
+      document.body.innerHTML = '<div style="padding: 20px; text-align: center;"><h2>Campus Not Available</h2><p>Unable to initialize the virtual campus. Please refresh the page.</p></div>';
+      return;
     }
-
-    // Check if React is available
-    if (typeof React === 'undefined' || typeof ReactDOM === 'undefined') {
-      throw new Error('React libraries not loaded');
-    }
-
+    
     const root = ReactDOM.createRoot(rootElement);
     root.render(
       React.createElement(ErrorBoundary, null, React.createElement(App))
     );
-    
-    console.log('App rendered successfully');
+    console.log('Virtual Campus initialized successfully');
   } catch (error) {
-    console.error('App initialization error:', error);
-    showFallbackUI();
+    console.error('App initialization failed:', error);
+    document.body.innerHTML = '<div style="padding: 20px; text-align: center;"><h2>Initialization Error</h2><p>Please refresh the page to try again.</p></div>';
   }
 }
 
-function showFallbackUI() {
-  const rootElement = document.getElementById('root');
-  if (rootElement) {
-    rootElement.innerHTML = `
-      <div style="min-height: 100vh; display: flex; align-items: center; justify-content: center; background: #0F0F0F; color: white; font-family: sans-serif;">
-        <div style="text-align: center; padding: 2rem; background: #1C1C1E; border-radius: 0.75rem; border: 1px solid #2D2D30; max-width: 400px; margin: 1rem;">
-          <div style="width: 4rem; height: 4rem; background: linear-gradient(135deg, #3B82F6, #8B5CF6); border-radius: 50%; display: flex; align-items: center; justify-content: center; margin: 0 auto 1rem;">
-            <span style="font-size: 1.5rem;">🎓</span>
-          </div>
-          <h1 style="color: #EF4444; margin-bottom: 1rem; font-size: 1.5rem;">Critical System Error</h1>
-          <p style="color: #D1D5DB; margin-bottom: 2rem;">Unable to initialize Virtual Campus. This may be due to:</p>
-          <ul style="color: #D1D5DB; text-align: left; margin-bottom: 2rem; list-style: none; padding: 0;">
-            <li style="margin-bottom: 0.5rem;">• Missing Firebase configuration</li>
-            <li style="margin-bottom: 0.5rem;">• JavaScript libraries not loaded</li>
-            <li style="margin-bottom: 0.5rem;">• Network connectivity issues</li>
-          </ul>
-          <button onclick="window.location.reload()" style="background: #3B82F6; color: white; border: none; padding: 0.75rem 1.5rem; border-radius: 0.5rem; cursor: pointer; font-weight: 600;">
-            Reload Campus
-          </button>
-        </div>
-      </div>
-    `;
-  }
+// Enhanced DOM ready check
+function waitForDOM() {
+  return new Promise((resolve) => {
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', resolve);
+    } else {
+      resolve();
+    }
+  });
 }
+
+// Initialize when ready
+waitForDOM().then(() => {
+  // Small delay to ensure all scripts are loaded
+  setTimeout(initializeApp, 100);
+});

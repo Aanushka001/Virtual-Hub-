@@ -1,42 +1,45 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Virtual Hub - Digital Campus Ecosystem</title>
-    <meta name="description" content="AI-powered digital campus platform connecting students, mentors, and resources">
-    <meta name="keywords" content="virtual hub, digital campus, student collaboration, mentorship, AI education">
-    <meta property="og:title" content="Virtual Hub - Digital Campus Ecosystem">
-    <meta property="og:description" content="AI-powered digital campus platform connecting students, mentors, and resources">
-    <meta name="twitter:title" content="Virtual Hub - Digital Campus Ecosystem">
-    <meta name="twitter:description" content="AI-powered digital campus platform connecting students, mentors, and resources">
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Virtual Hub - Digital Campus Ecosystem</title>
+  <meta name="description" content="AI-powered digital campus platform connecting students, mentors, and resources">
+  <meta name="keywords" content="virtual hub, digital campus, student collaboration, mentorship, AI education">
+  <meta property="og:title" content="Virtual Hub - Digital Campus Ecosystem">
+  <meta property="og:description" content="AI-powered digital campus platform connecting students, mentors, and resources">
+  <meta name="twitter:title" content="Virtual Hub - Digital Campus Ecosystem">
+  <meta name="twitter:description" content="AI-powered digital campus platform connecting students, mentors, and resources">
+<link rel="icon" href="/favicon.ico" />
 
-    <script src="https://resource.trickle.so/vendor_lib/unpkg/react@18/umd/react.production.min.js"></script>
-    <script src="https://resource.trickle.so/vendor_lib/unpkg/react-dom@18/umd/react-dom.production.min.js"></script>
-    <script src="https://resource.trickle.so/vendor_lib/unpkg/@babel/standalone/babel.min.js"></script>
-    <script src="https://cdn.tailwindcss.com"></script>
-    <link href="https://resource.trickle.so/vendor_lib/unpkg/lucide-static@0.516.0/font/lucide.css" rel="stylesheet">
+  <!-- React and Babel -->
+  <script src="https://resource.trickle.so/vendor_lib/unpkg/react@18/umd/react.production.min.js"></script>
+  <script src="https://resource.trickle.so/vendor_lib/unpkg/react-dom@18/umd/react-dom.production.min.js"></script>
+  <script src="https://resource.trickle.so/vendor_lib/unpkg/@babel/standalone/babel.min.js"></script>
 
-    <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
-    <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
-    <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
+  <!-- Tailwind -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link href="https://resource.trickle.so/vendor_lib/unpkg/lucide-static@0.516.0/font/lucide.css" rel="stylesheet">
+
+  <!-- Firebase -->
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
 
     <style>
         :root {
-            /* Light theme colors for better readability */
-            --base-bg: #f8fafc;
-            --primary-text: #1f2937;
-            --secondary-text: #6b7280;
-            --card-bg: #ffffff;
-            --accent-blue: #3b82f6;
-            --accent-purple: #8b5cf6;
-            --soft-shadow: rgba(0, 0, 0, 0.1);
+            --base-bg: #0F0F0F;
+            --primary-text: #FFFFFF;
+            --secondary-text: #D1D5DB;
+            --card-bg: #1C1C1E;
+            --accent-blue: #3B82F6;
+            --accent-purple: #8B5CF6;
+            --soft-shadow: rgba(139, 92, 246, 0.15);
             --outline-glow: rgba(59, 130, 246, 0.3);
-            --border-color: #e5e7eb;
-            --success-color: #10b981;
-            --warning-color: #f59e0b;
-            --danger-color: #ef4444;
-            --hover-bg: #f3f4f6;
+            --border-color: #2D2D30;
+            --success-color: #10B981;
+            --warning-color: #F59E0B;
+            --danger-color: #EF4444;
         }
 
         * {
@@ -68,36 +71,33 @@
         
         .btn-primary {
             background: var(--accent-blue);
-            color: white;
-            box-shadow: 0 4px 15px rgba(59, 130, 246, 0.3);
+            color: var(--primary-text);
+            box-shadow: 0 4px 15px var(--outline-glow);
         }
         
         .btn-primary:hover {
-            background: #2563eb;
-            box-shadow: 0 6px 20px rgba(59, 130, 246, 0.4);
+            box-shadow: 0 6px 20px var(--outline-glow);
             transform: translateY(-1px);
         }
         
         .btn-secondary {
             background: var(--card-bg);
-            color: var(--primary-text);
+            color: var(--secondary-text);
             border: 1px solid var(--border-color);
         }
         
         .btn-secondary:hover {
-            background: var(--hover-bg);
             border-color: var(--accent-blue);
-            box-shadow: 0 0 0 2px var(--outline-glow);
+            box-shadow: 0 0 0 1px var(--outline-glow);
         }
         
         .btn-success {
             background: var(--success-color);
-            color: white;
+            color: var(--primary-text);
             box-shadow: 0 4px 15px rgba(16, 185, 129, 0.3);
         }
         
         .btn-success:hover {
-            background: #059669;
             box-shadow: 0 6px 20px rgba(16, 185, 129, 0.4);
             transform: translateY(-1px);
         }
@@ -213,13 +213,13 @@
             display: flex;
             align-items: center;
             justify-content: center;
-            color: white;
+            color: var(--primary-text);
             font-weight: 600;
             box-shadow: 0 4px 12px var(--outline-glow);
         }
 
         .glass-effect {
-            background: rgba(255, 255, 255, 0.8);
+            background: rgba(28, 28, 30, 0.8);
             backdrop-filter: blur(10px);
             border: 1px solid var(--border-color);
         }
@@ -227,7 +227,7 @@
         .campus-shadow {
             box-shadow: 
                 0 4px 20px var(--soft-shadow),
-                0 1px 3px rgba(0, 0, 0, 0.1);
+                0 1px 3px rgba(0, 0, 0, 0.3);
         }
 
         .campus-gradient-text {
@@ -291,7 +291,7 @@
         }
 
         .loading-shimmer {
-            background: linear-gradient(90deg, var(--card-bg) 25%, var(--hover-bg) 50%, var(--card-bg) 75%);
+            background: linear-gradient(90deg, var(--card-bg) 25%, #2D2D30 50%, var(--card-bg) 75%);
             background-size: 200% 100%;
             animation: shimmer 1.5s infinite;
         }
@@ -346,7 +346,7 @@
         }
 
         .glow-purple {
-            box-shadow: 0 0 20px rgba(139, 92, 246, 0.3);
+            box-shadow: 0 0 20px var(--soft-shadow);
         }
 
         .text-gradient {
@@ -386,58 +386,36 @@
             width: 2rem;
             height: 2rem;
         }
-
-        /* Dark theme support */
-        @media (prefers-color-scheme: dark) {
-            :root {
-                --base-bg: #111827;
-                --primary-text: #f9fafb;
-                --secondary-text: #d1d5db;
-                --card-bg: #1f2937;
-                --border-color: #374151;
-                --hover-bg: #374151;
-            }
-        }
-
-        /* Force light theme for better readability */
-        body {
-            background: #f8fafc !important;
-            color: #1f2937 !important;
-        }
-
-        .main-content {
-            background: #f8fafc !important;
-        }
     </style>
 </head>
 <body>
-    <div id="root"></div>
-    <div id="error-message" style="display: none;"></div>
+  <div id="root"></div>
 
-    <!-- Load Firebase first -->
-    <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
-    <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
-    <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
+  <!-- Utilities -->
+  <script type="text/babel" src="utils/firebase.js"></script>
+  <script type="text/babel" src="utils/auth.js"></script>
+  <script type="text/babel" src="utils/router.js"></script>
+  <script type="text/babel" src="utils/api.js"></script>
+  <script type="text/babel" src="utils/notifications.js"></script>
+  <script type="text/babel" src="utils/data.js"></script>
 
-    <!-- Then load your utilities in order -->
-    <script type="text/babel" src="utils/firebase.js"></script>
-    <script type="text/babel" src="utils/auth.js"></script>
-    <script type="text/babel" src="utils/router.js"></script>
-    <script type="text/babel" src="utils/api.js"></script>
-    <script type="text/babel" src="utils/notifications.js"></script>
-    <script type="text/babel" src="utils/data.js"></script>
-    <script type="text/babel" src="components/Sidebar.js"></script>
-    <script type="text/babel" src="components/Header.js"></script>
-    <script type="text/babel" src="components/Auth/LoginForm.js"></script>
-    <script type="text/babel" src="components/Auth/ProfileSetup.js"></script>
-    <script type="text/babel" src="components/Auth/SignupForm.js"></script>
-    <script type="text/babel" src="pages/CampusHub.js"></script>
-    <script type="text/babel" src="pages/StudyGroups.js"></script>
-    <script type="text/babel" src="pages/Mentors.js"></script>
-    <script type="text/babel" src="pages/Resources.js"></script>
-    <script type="text/babel" src="pages/Opportunities.js"></script>
-    <script type="text/babel" src="pages/Leaderboard.js"></script>
-    <script type="text/babel" src="pages/Admin.js"></script>
-    <script type="text/babel" src="app.js"></script>
+  <!-- Components -->
+  <script type="text/babel" src="components/Sidebar.js"></script>
+  <script type="text/babel" src="components/Header.js"></script>
+  <script type="text/babel" src="components/Auth/LoginForm.js"></script>
+  <script type="text/babel" src="components/Auth/ProfileSetup.js"></script>
+  <script type="text/babel" src="components/Auth/SignupForm.js"></script>
+
+  <!-- Pages -->
+  <script type="text/babel" src="pages/CampusHub.js"></script>
+  <script type="text/babel" src="pages/StudyGroups.js"></script>
+  <script type="text/babel" src="pages/Mentors.js"></script>
+  <script type="text/babel" src="pages/Resources.js"></script>
+  <script type="text/babel" src="pages/Opportunities.js"></script>
+  <script type="text/babel" src="pages/Leaderboard.js"></script>
+  <script type="text/babel" src="pages/Admin.js"></script>
+
+  <!-- Main App -->
+  <script type="text/babel" src="app.js"></script>
 </body>
 </html>

@@ -10,3 +10,4 @@ Backend/firebase-credentials.json
 # Virtual environment
 venv/
 Backend/venv/
+.vercel

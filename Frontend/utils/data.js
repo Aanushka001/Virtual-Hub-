@@ -1,340 +1,514 @@
-// utils/data.js - Fixed data utilities
 window.dataUtils = {
-  // User statistics
-  getUserStats: async (userId) => {
+  requestCache: new Map(),
+  dataCache: new Map(),
+  cacheTimeout: 3 * 60 * 1000, // 3 minutes for data cache
+
+  // Prevent duplicate requests with same parameters
+  withRequestDeduplication: async (key, requestFn) => {
+    if (window.dataUtils.requestCache.has(key)) {
+      return await window.dataUtils.requestCache.get(key);
+    }
+
+    const promise = requestFn();
+    window.dataUtils.requestCache.set(key, promise);
+    
     try {
-      if (!userId || !window.firestore) {
-        return {
-          studyGroups: 0,
-          mentorships: 0,
-          resources: 0,
-          points: 0
-        };
-      }
-
-      const userDoc = await window.firestore.collection('users').doc(userId).get();
-      if (!userDoc.exists) {
-        return {
-          studyGroups: 0,
-          mentorships: 0,
-          resources: 0,
-          points: 0
-        };
-      }
-
-      const userData = userDoc.data();
-      return {
-        studyGroups: (userData.studyGroups || []).length,
-        mentorships: (userData.mentorships || []).length,
-        resources: (userData.resources || []).length,
-        points: userData.points || 0
-      };
-    } catch (error) {
-      console.error('Error getting user stats:', error);
-      return {
-        studyGroups: 0,
-        mentorships: 0,
-        resources: 0,
-        points: 0
-      };
+      const result = await promise;
+      return result;
+    } finally {
+      // Clean up after request completes
+      setTimeout(() => {
+        window.dataUtils.requestCache.delete(key);
+      }, 1000);
     }
   },
 
-  // Study groups
-  getStudyGroups: async () => {
-    try {
-      if (!window.firestore) {
-        return [
-          {
-            id: 'group_1',
-            name: 'React Fundamentals',
-            subject: 'Web Development',
-            level: 'Beginner',
-            description: 'Learn React basics together',
-            maxMembers: 5,
-            members: ['user1', 'user2'],
-            createdBy: 'mentor1',
-            createdAt: new Date().toISOString()
-          },
-          {
-            id: 'group_2',
-            name: 'Data Science Bootcamp',
-            subject: 'Data Science',
-            level: 'Intermediate',
-            description: 'Advanced data analysis techniques',
-            maxMembers: 8,
-            members: ['user3'],
-            createdBy: 'mentor2',
-            createdAt: new Date().toISOString()
-          }
-        ];
-      }
+  // Cache data with timestamp
+  setCacheData: (key, data) => {
+    window.dataUtils.dataCache.set(key, {
+      data,
+      timestamp: Date.now()
+    });
+  },
 
-      const snapshot = await window.firestore.collection('study_groups').get();
-      return snapshot.docs.map(doc => ({
-        id: doc.id,
-        ...doc.data()
-      }));
-    } catch (error) {
-      console.error('Error fetching study groups:', error);
-      return [];
+  getCacheData: (key) => {
+    const cached = window.dataUtils.dataCache.get(key);
+    if (!cached) return null;
+    
+    if (Date.now() - cached.timestamp > window.dataUtils.cacheTimeout) {
+      window.dataUtils.dataCache.delete(key);
+      return null;
     }
+    
+    return cached.data;
+  },
+
+  getUserStats: async (userId) => {
+    const cacheKey = `user_stats_${userId}`;
+    const cached = window.dataUtils.getCacheData(cacheKey);
+    if (cached) return cached;
+
+    return await window.dataUtils.withRequestDeduplication(`getUserStats_${userId}`, async () => {
+      try {
+        const isDemo = window.localStorage.getItem('isDemoMode') === 'true';
+        
+        if (isDemo) {
+          const stats = { studyGroups: 2, mentorships: 1, resources: 3, points: 150 };
+          window.dataUtils.setCacheData(cacheKey, stats);
+          return stats;
+        }
+
+        const [userDoc, userGroupsSnapshot, userResourcesSnapshot, userMentorshipsSnapshot] = await Promise.all([
+          window.firestore.collection('users').doc(userId).get(),
+          window.firestore.collection('study_groups').where('members', 'array-contains', userId).get(),
+          window.firestore.collection('resources').where('uploadedBy', '==', userId).get(),
+          window.firestore.collection('mentorships').where('studentId', '==', userId).where('status', '==', 'accepted').get()
+        ]);
+
+        const userData = userDoc.data() || {};
+        const stats = {
+          studyGroups: userGroupsSnapshot.size,
+          mentorships: userMentorshipsSnapshot.size,
+          resources: userResourcesSnapshot.size,
+          points: userData.points || 0
+        };
+
+        window.dataUtils.setCacheData(cacheKey, stats);
+        return stats;
+      } catch (error) {
+        console.error('Error fetching user stats:', error);
+        const fallbackStats = { studyGroups: 0, mentorships: 0, resources: 0, points: 0 };
+        window.dataUtils.setCacheData(cacheKey, fallbackStats);
+        return fallbackStats;
+      }
+    });
+  },
+
+  getStudyGroups: async () => {
+    const cacheKey = 'study_groups';
+    const cached = window.dataUtils.getCacheData(cacheKey);
+    if (cached) return cached;
+
+    return await window.dataUtils.withRequestDeduplication('getStudyGroups', async () => {
+      try {
+        const snapshot = await window.firestore.collection('study_groups').orderBy('createdAt', 'desc').get();
+        const groups = snapshot.docs.map(doc => ({
+          id: doc.id,
+          ...doc.data()
+        }));
+        
+        window.dataUtils.setCacheData(cacheKey, groups);
+        return groups;
+      } catch (error) {
+        console.error('Error fetching study groups:', error);
+        return [];
+      }
+    });
+  },
+
+  getMentors: async () => {
+    const cacheKey = 'mentors';
+    const cached = window.dataUtils.getCacheData(cacheKey);
+    if (cached) return cached;
+
+    return await window.dataUtils.withRequestDeduplication('getMentors', async () => {
+      try {
+        const snapshot = await window.firestore.collection('mentors').get();
+        const mentors = snapshot.docs.map(doc => ({
+          id: doc.id,
+          ...doc.data()
+        }));
+        
+        window.dataUtils.setCacheData(cacheKey, mentors);
+        return mentors;
+      } catch (error) {
+        console.error('Error fetching mentors:', error);
+        return [];
+      }
+    });
+  },
+
+  getResources: async () => {
+    const cacheKey = 'resources';
+    const cached = window.dataUtils.getCacheData(cacheKey);
+    if (cached) return cached;
+
+    return await window.dataUtils.withRequestDeduplication('getResources', async () => {
+      try {
+        const snapshot = await window.firestore.collection('resources').orderBy('createdAt', 'desc').get();
+        const resources = snapshot.docs.map(doc => ({
+          id: doc.id,
+          ...doc.data()
+        }));
+        
+        window.dataUtils.setCacheData(cacheKey, resources);
+        return resources;
+      } catch (error) {
+        console.error('Error fetching resources:', error);
+        return [];
+      }
+    });
+  },
+
+  getOpportunities: async () => {
+    const cacheKey = 'opportunities';
+    const cached = window.dataUtils.getCacheData(cacheKey);
+    if (cached) return cached;
+
+    return await window.dataUtils.withRequestDeduplication('getOpportunities', async () => {
+      try {
+        const snapshot = await window.firestore.collection('opportunities').orderBy('createdAt', 'desc').get();
+        const opportunities = snapshot.docs.map(doc => ({
+          id: doc.id,
+          ...doc.data()
+        }));
+        
+        window.dataUtils.setCacheData(cacheKey, opportunities);
+        return opportunities;
+      } catch (error) {
+        console.error('Error fetching opportunities:', error);
+        return [];
+      }
+    });
+  },
+
+  getUserAchievements: async (userId) => {
+    const cacheKey = `user_achievements_${userId}`;
+    const cached = window.dataUtils.getCacheData(cacheKey);
+    if (cached) return cached;
+
+    return await window.dataUtils.withRequestDeduplication(`getUserAchievements_${userId}`, async () => {
+      try {
+        const userDoc = await window.firestore.collection('users').doc(userId).get();
+        if (userDoc.exists) {
+          const userData = userDoc.data();
+          const achievements = userData.badges || [];
+          window.dataUtils.setCacheData(cacheKey, achievements);
+          return achievements;
+        }
+        return [];
+      } catch (error) {
+        console.error('Error fetching user achievements:', error);
+        return [];
+      }
+    });
   },
 
   createStudyGroup: async (groupData, userId) => {
-    try {
-      if (!window.firestore) {
-        throw new Error('Firestore not available');
+    return await window.dataUtils.withRequestDeduplication(`createGroup_${userId}_${Date.now()}`, async () => {
+      try {
+        const newGroup = {
+          ...groupData,
+          members: [userId],
+          createdBy: userId,
+          createdAt: firebase.firestore.FieldValue.serverTimestamp(),
+          memberCount: 1,
+          isActive: true
+        };
+
+        const docRef = await window.firestore.collection('study_groups').add(newGroup);
+        
+        // Update user points
+        await window.firestore.collection('users').doc(userId).update({
+          points: firebase.firestore.FieldValue.increment(10),
+          studyGroups: firebase.firestore.FieldValue.arrayUnion(docRef.id)
+        });
+
+        // Clear cache to force refresh
+        window.dataUtils.dataCache.delete('study_groups');
+        window.dataUtils.dataCache.delete(`user_stats_${userId}`);
+
+        await window.notificationUtils.createNotification(
+          userId,
+          'Study Group Created',
+          `You created the study group "${groupData.name}"`,
+          'success'
+        );
+
+        return docRef.id;
+      } catch (error) {
+        console.error('Error creating study group:', error);
+        throw error;
       }
-
-      const groupId = `group_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-      const newGroup = {
-        ...groupData,
-        id: groupId,
-        createdBy: userId,
-        members: [userId],
-        createdAt: firebase.firestore.FieldValue.serverTimestamp(),
-        isActive: true
-      };
-
-      await window.firestore.collection('study_groups').doc(groupId).set(newGroup);
-      return groupId;
-    } catch (error) {
-      console.error('Error creating study group:', error);
-      throw error;
-    }
+    });
   },
 
   joinStudyGroup: async (groupId, userId, userName) => {
-    try {
-      if (!window.firestore) {
-        throw new Error('Firestore not available');
+    return await window.dataUtils.withRequestDeduplication(`joinGroup_${groupId}_${userId}`, async () => {
+      try {
+        const groupRef = window.firestore.collection('study_groups').doc(groupId);
+        const groupDoc = await groupRef.get();
+        
+        if (!groupDoc.exists) {
+          throw new Error('Study group not found');
+        }
+
+        const groupData = groupDoc.data();
+        
+        if (groupData.members.includes(userId)) {
+          throw new Error('Already a member of this group');
+        }
+
+        if (groupData.members.length >= (groupData.maxMembers || 5)) {
+          throw new Error('Group is full');
+        }
+
+        await groupRef.update({
+          members: firebase.firestore.FieldValue.arrayUnion(userId),
+          memberCount: firebase.firestore.FieldValue.increment(1)
+        });
+
+        // Update user points
+        await window.firestore.collection('users').doc(userId).update({
+          points: firebase.firestore.FieldValue.increment(10),
+          studyGroups: firebase.firestore.FieldValue.arrayUnion(groupId)
+        });
+
+        // Clear relevant caches
+        window.dataUtils.dataCache.delete('study_groups');
+        window.dataUtils.dataCache.delete(`user_stats_${userId}`);
+
+        // Notify existing members
+        for (const memberId of groupData.members) {
+          await window.notificationUtils.createNotification(
+            memberId,
+            'New Group Member',
+            `${userName} joined your study group "${groupData.name}"`,
+            'info'
+          );
+        }
+
+        await window.notificationUtils.createNotification(
+          userId,
+          'Joined Study Group',
+          `You joined the study group "${groupData.name}"`,
+          'success'
+        );
+
+        return true;
+      } catch (error) {
+        console.error('Error joining study group:', error);
+        throw error;
       }
-
-      await window.firestore.collection('study_groups').doc(groupId).update({
-        members: firebase.firestore.FieldValue.arrayUnion(userId)
-      });
-
-      // Update user's study groups
-      await window.firestore.collection('users').doc(userId).update({
-        studyGroups: firebase.firestore.FieldValue.arrayUnion(groupId)
-      });
-
-      return true;
-    } catch (error) {
-      console.error('Error joining study group:', error);
-      throw error;
-    }
+    });
   },
 
-  // Mentors
-  getMentors: async () => {
-    try {
-      if (!window.firestore) {
-        return [
+  requestMentorship: async (mentorId, studentId, studentName, message) => {
+    return await window.dataUtils.withRequestDeduplication(`requestMentor_${mentorId}_${studentId}`, async () => {
+      try {
+        const mentorDoc = await window.firestore.collection('mentors').doc(mentorId).get();
+        
+        if (!mentorDoc.exists) {
+          throw new Error('Mentor not found');
+        }
+
+        const mentorData = mentorDoc.data();
+
+        const requestData = {
+          mentorId: mentorId,
+          studentId: studentId,
+          studentName: studentName,
+          message: message || '',
+          status: 'pending',
+          createdAt: firebase.firestore.FieldValue.serverTimestamp()
+        };
+
+        const docRef = await window.firestore.collection('mentorship_requests').add(requestData);
+
+        await window.notificationUtils.createNotification(
+          mentorData.userId,
+          'New Mentorship Request',
+          `${studentName} requested mentorship from you`,
+          'info'
+        );
+
+        await window.notificationUtils.createNotification(
+          studentId,
+          'Mentorship Request Sent',
+          `Your mentorship request to ${mentorData.name} has been sent`,
+          'success'
+        );
+
+        return docRef.id;
+      } catch (error) {
+        console.error('Error requesting mentorship:', error);
+        throw error;
+      }
+    });
+  },
+
+  createSampleData: async () => {
+    return await window.dataUtils.withRequestDeduplication('createSampleData', async () => {
+      try {
+        // Check if data already exists
+        const [groupsSnapshot, mentorsSnapshot, opportunitiesSnapshot] = await Promise.all([
+          window.firestore.collection('study_groups').limit(1).get(),
+          window.firestore.collection('mentors').limit(1).get(),
+          window.firestore.collection('opportunities').limit(1).get()
+        ]);
+
+        if (groupsSnapshot.size > 0 || mentorsSnapshot.size > 0 || opportunitiesSnapshot.size > 0) {
+          console.log('Sample data already exists');
+          return false;
+        }
+
+        const sampleGroups = [
           {
-            id: 'mentor_1',
-            name: 'Dr. Sarah Johnson',
-            expertise: 'Full Stack Development',
-            company: 'Google',
-            experience: '8+ years',
-            rating: 4.9,
-            bio: 'Senior Software Engineer specializing in React and Node.js',
-            isAvailable: true
+            name: 'React Developers Hub',
+            subject: 'Web Development',
+            level: 'Intermediate',
+            description: 'Learn React.js and build modern web applications together',
+            maxMembers: 5,
+            members: [],
+            createdBy: 'system',
+            isActive: true,
+            memberCount: 0
           },
           {
-            id: 'mentor_2',
-            name: 'Michael Chen',
-            expertise: 'Data Science & ML',
-            company: 'Microsoft',
-            experience: '6+ years',
-            rating: 4.8,
-            bio: 'Data Scientist with expertise in Python and machine learning',
-            isAvailable: true
+            name: 'Python Data Science',
+            subject: 'Data Science',
+            level: 'Beginner',
+            description: 'Introduction to data analysis with Python and pandas',
+            maxMembers: 8,
+            members: [],
+            createdBy: 'system',
+            isActive: true,
+            memberCount: 0
           },
           {
-            id: 'mentor_3',
-            name: 'Emily Rodriguez',
-            expertise: 'UI/UX Design',
-            company: 'Adobe',
+            name: 'UI/UX Design Workshop',
+            subject: 'Design',
+            level: 'Intermediate',
+            description: 'Learn modern design principles and create amazing user experiences',
+            maxMembers: 6,
+            members: [],
+            createdBy: 'system',
+            isActive: true,
+            memberCount: 0
+          }
+        ];
+
+        const sampleMentors = [
+          {
+            name: 'Sarah Johnson',
+            userId: 'mentor_1',
+            expertise: 'Web Development',
             experience: '5+ years',
+            bio: 'Senior Frontend Developer at Google with expertise in React, Vue, and modern JavaScript frameworks',
+            company: 'Google',
             rating: 4.9,
-            bio: 'Product Designer focused on user-centered design principles',
-            isAvailable: false
-          }
-        ];
-      }
-
-      const snapshot = await window.firestore.collection('mentors').get();
-      return snapshot.docs.map(doc => ({
-        id: doc.id,
-        ...doc.data()
-      }));
-    } catch (error) {
-      console.error('Error fetching mentors:', error);
-      return [];
-    }
-  },
-
-  // Resources
-  getResources: async () => {
-    try {
-      if (!window.firestore) {
-        return [
-          {
-            id: 'resource_1',
-            title: 'JavaScript Fundamentals Guide',
-            type: 'PDF',
-            category: 'Programming',
-            description: 'Complete guide to JavaScript basics',
-            size: '2.5 MB',
-            uploadedBy: 'mentor1',
-            uploaderName: 'Dr. Sarah Johnson',
-            createdAt: new Date().toISOString()
+            availability: 'Weekends'
           },
           {
-            id: 'resource_2',
-            title: 'React Hooks Tutorial',
-            type: 'Video',
-            category: 'Programming',
-            description: 'Learn React Hooks with practical examples',
-            duration: '45 min',
-            uploadedBy: 'mentor2',
-            uploaderName: 'Michael Chen',
-            createdAt: new Date().toISOString()
+            name: 'Alex Chen',
+            userId: 'mentor_2',
+            expertise: 'Data Science',
+            experience: '3-5 years',
+            bio: 'Data Scientist specializing in machine learning and statistical analysis',
+            company: 'Meta',
+            rating: 4.8,
+            availability: 'Evenings'
+          },
+          {
+            name: 'Maria Rodriguez',
+            userId: 'mentor_3',
+            expertise: 'UI/UX Design',
+            experience: '4-6 years',
+            bio: 'Lead UX Designer with experience in user research and interface design',
+            company: 'Adobe',
+            rating: 4.9,
+            availability: 'Flexible'
           }
         ];
-      }
 
-      const snapshot = await window.firestore.collection('resources').get();
-      return snapshot.docs.map(doc => ({
-        id: doc.id,
-        ...doc.data()
-      }));
-    } catch (error) {
-      console.error('Error fetching resources:', error);
-      return [];
-    }
-  },
-
-  // Opportunities
-  getOpportunities: async () => {
-    try {
-      if (!window.firestore) {
-        return [
+        const sampleOpportunities = [
           {
-            id: 'opp_1',
-            title: 'Global Coding Challenge 2025',
+            title: 'Global Hackathon 2025',
             type: 'Competition',
             difficulty: 'Intermediate',
-            organizer: 'TechCorp',
-            deadline: 'March 15, 2025',
+            deadline: '2025-09-15',
+            description: 'Build innovative solutions for social good and compete with teams worldwide',
             prizes: '$10,000 in prizes',
-            description: 'Build innovative solutions using modern web technologies',
-            tags: ['JavaScript', 'React', 'API'],
-            registrationUrl: 'https://example.com/register'
+            organizer: 'TechForGood',
+            isActive: true
           },
           {
-            id: 'opp_2',
             title: 'AI/ML Workshop Series',
             type: 'Workshop',
             difficulty: 'Beginner',
-            organizer: 'AI Institute',
-            deadline: 'February 28, 2025',
-            prizes: 'Certificate + Mentorship',
-            description: 'Learn machine learning fundamentals with hands-on projects',
-            tags: ['Python', 'ML', 'TensorFlow'],
-            registrationUrl: 'https://example.com/ai-workshop'
+            deadline: '2025-09-10',
+            description: 'Learn fundamentals of artificial intelligence and machine learning',
+            location: 'Online',
+            organizer: 'AI Academy',
+            isActive: true
           },
           {
-            id: 'opp_3',
-            title: 'Summer Internship Program',
+            title: 'Summer Tech Internship',
             type: 'Internship',
             difficulty: 'Advanced',
-            organizer: 'StartupX',
-            deadline: 'April 1, 2025',
-            prizes: 'Paid Internship + Job Offer',
-            description: 'Work on real-world projects with experienced developers',
-            tags: ['Full-time', 'Remote', 'Startup'],
-            registrationUrl: 'https://example.com/internship'
+            deadline: '2025-09-05',
+            description: '3-month paid internship program with leading tech companies',
+            prizes: 'Paid position with potential for full-time offer',
+            organizer: 'Tech Careers',
+            isActive: true
           }
         ];
-      }
 
-      const snapshot = await window.firestore.collection('opportunities').get();
-      return snapshot.docs.map(doc => ({
-        id: doc.id,
-        ...doc.data()
-      }));
-    } catch (error) {
-      console.error('Error fetching opportunities:', error);
-      return [];
-    }
+        // Create sample data with batched writes for better performance
+        const batch = window.firestore.batch();
+
+        sampleGroups.forEach((group) => {
+          const docRef = window.firestore.collection('study_groups').doc();
+          batch.set(docRef, {
+            ...group,
+            createdAt: firebase.firestore.FieldValue.serverTimestamp()
+          });
+        });
+
+        sampleMentors.forEach((mentor) => {
+          const docRef = window.firestore.collection('mentors').doc();
+          batch.set(docRef, {
+            ...mentor,
+            createdAt: firebase.firestore.FieldValue.serverTimestamp()
+          });
+        });
+
+        sampleOpportunities.forEach((opportunity) => {
+          const docRef = window.firestore.collection('opportunities').doc();
+          batch.set(docRef, {
+            ...opportunity,
+            createdAt: firebase.firestore.FieldValue.serverTimestamp()
+          });
+        });
+
+        await batch.commit();
+
+        // Clear all caches to force refresh
+        window.dataUtils.dataCache.clear();
+        window.apiUtils?.clearCache?.();
+
+        console.log('Sample data created successfully');
+        return true;
+      } catch (error) {
+        console.error('Error creating sample data:', error);
+        return false;
+      }
+    });
   },
 
   // Utility functions
-  generateId: (prefix = '') => {
-    return `${prefix}_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+  clearCache: () => {
+    window.dataUtils.dataCache.clear();
+    window.dataUtils.requestCache.clear();
   },
 
-  formatDate: (date) => {
-    try {
-      if (!date) return 'Unknown';
-      const d = new Date(date);
-      return d.toLocaleDateString();
-    } catch (error) {
-      return 'Invalid Date';
-    }
-  },
-
-  formatTime: (timestamp) => {
-    try {
-      const date = new Date(timestamp);
-      const now = new Date();
-      const diffMinutes = Math.floor((now - date) / 60000);
-      
-      if (diffMinutes < 1) return 'Just now';
-      if (diffMinutes < 60) return `${diffMinutes}m ago`;
-      if (diffMinutes < 1440) return `${Math.floor(diffMinutes / 60)}h ago`;
-      return date.toLocaleDateString();
-    } catch (error) {
-      return 'Unknown time';
-    }
-  },
-
-  // Error handling
-  handleDataError: (error, context) => {
-    console.error(`Data error in ${context}:`, error);
-    
-    // You could also send to error tracking service here
-    if (window.errorTracking) {
-      window.errorTracking.logError(error, context);
-    }
-  },
-
-  // Validation
-  validateGroupData: (groupData) => {
-    const required = ['name', 'subject', 'level'];
-    for (const field of required) {
-      if (!groupData[field] || groupData[field].trim() === '') {
-        throw new Error(`${field} is required`);
+  invalidateUserCache: (userId) => {
+    const keysToDelete = [];
+    for (const [key] of window.dataUtils.dataCache) {
+      if (key.includes(userId)) {
+        keysToDelete.push(key);
       }
     }
-    
-    if (groupData.maxMembers < 2 || groupData.maxMembers > 20) {
-      throw new Error('Max members must be between 2 and 20');
-    }
-    
-    return true;
-  },
-
-  validateResourceData: (resourceData) => {
-    const required = ['title', 'type', 'category'];
-    for (const field of required) {
-      if (!resourceData[field] || resourceData[field].trim() === '') {
-        throw new Error(`${field} is required`);
-      }
-    }
-    return true;
+    keysToDelete.forEach(key => window.dataUtils.dataCache.delete(key));
   }
 };
