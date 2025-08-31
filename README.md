@@ -127,7 +127,6 @@ This project is licensed under the MIT License.
 📞 Contact
 
 Project Lead: Aanushka Singh
-Email: [your-email@example.com
-]
+Email: aanushkasingh328@gmail.com
 GitHub: https://github.com/Aanushka001
 
