@@ -1,0 +1,12 @@
+# Environment files
+*.env
+*.env.local
+Backend/.env
+Frontend/.env.local
+
+# Firebase credentials
+Backend/firebase-credentials.json
+
+# Virtual environment
+venv/
+Backend/venv/

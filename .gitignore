@@ -1,0 +1,12 @@
+# Ignore firebase creds
+Backend/firebase-credentials.json
+
+# Ignore env files
+.env
+.env.local
+Backend/.env
+Backend/.env.local
+
+# Ignore Python venv
+venv/
+Backend/venv/
